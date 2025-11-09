@@ -220,3 +220,59 @@ fn collect(continuations: &mut Vec<Bytes>) -> Bytes {
 
     buf.freeze()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::task::Poll;
+
+    use actix_http::{
+        ws::{Item, Message},
+        Payload,
+    };
+    use actix_web::web::Bytes;
+    use futures_core::Stream;
+
+    use super::{AggregatedMessage, MessageStream};
+
+    #[test]
+    fn stream_aggregates_continuations() {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                std::future::poll_fn(|cx| {
+                    let mut stream = MessageStream::new(Payload::None);
+
+                    stream.push(Message::Continuation(Item::FirstText(Bytes::from(
+                        b"first".to_vec(),
+                    ))));
+                    stream.push(Message::Continuation(Item::Continue(Bytes::from(
+                        b"second".to_vec(),
+                    ))));
+                    stream.push(Message::Continuation(Item::Last(Bytes::from(
+                        b"third".to_vec(),
+                    ))));
+
+                    let aggregated = stream.aggregate_continuations();
+
+                    let mut aggregated = std::pin::pin!(aggregated);
+
+                    match aggregated.as_mut().poll_next(cx) {
+                        Poll::Ready(Some(Ok(AggregatedMessage::Text(bs))))
+                            if bs == "firstsecondthird" =>
+                        {
+                            ()
+                        }
+                        Poll::Ready(Some(Ok(AggregatedMessage::Text(bs)))) => {
+                            panic!("msg not aggregated correctly: {bs}")
+                        }
+                        Poll::Ready(_) => panic!("Wrong message type"),
+                        Poll::Pending => panic!("Stream shouldn't be pending"),
+                    }
+
+                    Poll::Ready(())
+                })
+                .await;
+            })
+    }
+}

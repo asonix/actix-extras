@@ -110,6 +110,11 @@ impl MessageStream {
     pub async fn recv(&mut self) -> Option<Result<Message, ProtocolError>> {
         poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
     }
+
+    #[cfg(test)]
+    pub(crate) fn push(&mut self, message: Message) {
+        self.messages.push_back(message);
+    }
 }
 
 impl Stream for StreamingBody {
